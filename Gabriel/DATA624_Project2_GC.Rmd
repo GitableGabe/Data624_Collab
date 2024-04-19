@@ -47,8 +47,10 @@ Please submit both Rpubs links and .rmd files or other readable formats for tech
 
 # Data Import
 
-```{r}
-StudentData_df <- readxl::read_xlsx('Data/StudentData.xlsx')
-StudentEval_df <- readxl::read_xlsx('Data/StudentEvaluation.xlsx')
+```{r load}
+#StudentData_df <- readxl::read_xlsx('Data/StudentData.xlsx')
+#StudentEval_df <- readxl::read_xlsx('Data/StudentEvaluation.xlsx')
+StudentData_df <- readxl::read_xlsx('../Data/StudentData.xlsx')
+StudentEval_df <- readxl::read_xlsx('../Data/StudentEvaluation.xlsx')
 ```
 
