@@ -3,37 +3,46 @@ title: 'DATA 624: PREDICTIVE ANALYTICS: Project 2'
 author: "Melissa Bowman, Frederick Jones, Shoshana Farber, Gabriel Campos"
 date: "Last edited `r format(Sys.time(), '%B %d, %Y')`"
 output:
-  pdf_document:
-    latex_engine: xelatex
+  html_notebook: default
   geometry: left=0.5cm,right=0.5cm,top=1cm,bottom=2cm
   html_document:
     df_print: paged
-  html_notebook: default
+  pdf_document:
+    latex_engine: xelatex
 urlcolor: blue
 ---
 
 # Library
 
 ```{r, warning=FALSE, message=FALSE}
+library(Amelia)
+library(car)
 library(caret)
 library(corrplot)
 library(Cubist)
+library(DataExplorer)
 library(dplyr)
+library(e1071)
 library(earth)
+library(forcats)
 library(forecast)
 library(fpp3)
 library(gbm)
 library(ggplot2)
+library(kableExtra)
 library(MASS)
 library(mice)
 library(mlbench)
 library(party)
 library(randomForest)
-library(readxl)
 library(RANN)
+library(RColorBrewer)
+library(readxl)
 library(rpart)
 library(rpart.plot)
+library(summarytools)
 library(tidyr)
+library(VIM)
 ```
 
 # Description
@@ -48,7 +57,77 @@ Please submit both Rpubs links and .rmd files or other readable formats for tech
 # Data Import
 
 ```{r}
-StudentData_df <- readxl::read_xlsx('Data/StudentData.xlsx')
-StudentEval_df <- readxl::read_xlsx('Data/StudentEvaluation.xlsx')
+train_df <- readxl::read_xlsx('Data/StudentData.xlsx')
+test_df <- readxl::read_xlsx('Data/StudentEvaluation.xlsx')
 ```
 
+StudentData.xlsx is our Training data set.
+StudentEvaluation.xlsx is our Test data set.
+
+# Exporatory Data Analysis
+
+## Initial Exploration
+
+```{r}
+glimpse(train_df)
+```
+
+```{r}
+str(train_df)
+```
+
+```{r}
+summary(train_df)
+```
+
+
+```{r}
+glimpse(test_df)
+```
+
+```{r}
+str(test_df)
+```
+
+```{r}
+summary(test_df)
+```
+
+## NA Proportions
+
+```{r}
+missing_data <- train_df %>%
+                summarise(across(everything(), ~mean(is.na(.)))) %>%
+                pivot_longer(cols = everything(), names_to = "variable", values_to = "na_proportion")
+
+# Create a bar plot using ggplot2
+ggplot(missing_data, aes(x = variable, y = na_proportion)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "lightblue") +
+  theme_minimal() +
+  labs(y = "NA Proportion", x = "Variables") +
+  coord_flip()  
+```
+
+
+## Distribution
+
+```{r}
+DataExplorer::plot_histogram(train_df, nrow = 3L, ncol = 4L)
+```
+
+
+## Initial Findings
+
+* Data consists of 2571 observations with 33 columns
+* `Brain Code`
+  + Type character
+  + Unordered categorical values
+*Predictors:
+  + Primarily doubles
+  + 4 can be considered integers
+  + High range variables:
+    i. `Mnf Flow` -100.20 to 220.40
+    ii. `Hyd Pressure1` -50.00 to 50.00
+    iii. `Hyd Pressure2` -50.00 to 61.40
+    iv. `Hyd Pressure3` -50.00 to 49.20
+    v. `Hyd Pressure4` 68.00 to 140.00
