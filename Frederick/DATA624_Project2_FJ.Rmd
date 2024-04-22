@@ -126,7 +126,7 @@ DataExplorer::plot_histogram(train_df, nrow = 3L, ncol = 4L)
 ### Initial Findings
 
 * Data consists of 2571 observations with 33 columns
-* `Brain Code`:
+* `Brand Code`:
   + Type character
   + Unordered categorical values
 *Predictors:
