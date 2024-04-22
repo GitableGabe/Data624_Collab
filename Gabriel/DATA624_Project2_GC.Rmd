@@ -126,10 +126,10 @@ DataExplorer::plot_histogram(train_df, nrow = 3L, ncol = 4L)
 ### Initial Findings
 
 * Data consists of 2571 observations with 33 columns
-* `Brain Code`:
+* `Brand Code`:
   + Type character
   + Unordered categorical values
-*Predictors:
+* Predictors:
   + Primarily doubles
   + 4 can be considered integers
   + High range variables:
@@ -229,7 +229,7 @@ corrplot(train_numeric_cor,
 
 ### PH
 
-With PH being our response variable, assessing the correlation of PH with other variables is needed.
+With PH being our response variable, assessing PH correlation with other variables is needed.
 
 ```{r ph_corrplot, fig.height=7}
 train_numeric_df %>%
@@ -249,7 +249,7 @@ train_numeric_df %>%
 
 ### Correlation Findings
 
-Based on our plots and variable relationships multiicolliniarity is a concern, noting the number of predictor variables with significant correlation.
+Multicolliniarity is a concern, based on our plots, considering the number of predictor variables with significant correlation.
 
 ## Data Cleanup
 
