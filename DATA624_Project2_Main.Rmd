@@ -3,12 +3,12 @@ title: 'DATA 624: PREDICTIVE ANALYTICS: Project 2'
 author: "Melissa Bowman, Frederick Jones, Shoshana Farber, Gabriel Campos"
 date: "Last edited `r format(Sys.time(), '%B %d, %Y')`"
 output:
-  html_notebook: default
+  pdf_document:
+    latex_engine: xelatex
   geometry: left=0.5cm,right=0.5cm,top=1cm,bottom=2cm
   html_document:
     df_print: paged
-  pdf_document:
-    latex_engine: xelatex
+  html_notebook: default
 urlcolor: blue
 ---
 
@@ -347,3 +347,28 @@ train_proc_df <- train_preProc_df[training_set_df,]
 eval_proc_df <- train_preProc_df[-training_set_df,]
 ```
 
+## PLS
+
+```{r}
+set.seed(222)
+y_train <- subset(train_proc_df, select = -c(PH))
+y_test <- subset(eval_proc_df, select = -c(PH))
+```
+
+```{r message=FALSE, warning=FALSE}
+set.seed(2341)
+#generate model
+pls_model <- train(y_train, train_proc_df$PH,
+                      method='pls',
+                      metric='Rsquared',
+                      tuneLength=10,
+                      trControl=trainControl(method = "cv",  number = 10))
+#evaluate model metrics
+plsPred <-predict(pls_model, newdata=y_test)
+plsReSample <- postResample(pred=plsPred, obs = eval_proc_df$PH)
+```
+
+```{r message=FALSE, warning=FALSE}
+
+plsReSample %>% kable() %>% kable_paper()
+```
