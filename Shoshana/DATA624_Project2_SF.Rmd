@@ -1,5 +1,5 @@
 ---
-title: 'DATA 624: PREDICTIVE ANALYTICS: Project 2'
+title: 'DATA 624 PREDICTIVE ANALYTICS - Project 2'
 author: "Melissa Bowman, Frederick Jones, Shoshana Farber, Gabriel Campos"
 date: "Last edited `r format(Sys.time(), '%B %d, %Y')`"
 output:
@@ -12,7 +12,7 @@ output:
 urlcolor: blue
 ---
 
-# Library
+# Libraries
 
 ```{r, warning=FALSE, message=FALSE}
 library(Amelia)
@@ -45,70 +45,65 @@ library(tidyr)
 library(VIM)
 ```
 
-# Description
+# Assignment Description
 
 **Project #2 (Team) Assignment**
 
-This is role playing.  I am your new boss.  I am in charge of production at ABC Beverage and you are a team of data scientists reporting to me.  My leadership has told me that new regulations are requiring us to understand our manufacturing process, the predictive factors and be able to report to them our predictive model of PH.
+This is role playing.  I am your new boss.  I am in charge of production at ABC Beverage and you are a team of data scientists reporting to me.  My leadership has told me that new regulations are requiring us to understand our manufacturing process, the predictive factors and be able to report to them our predictive model of pH.
 
 Please use the historical data set I am providing.  Build and report the factors in BOTH a technical and non-technical report.  I like to use Word and Excel.  Please provide your non-technical report in a  business friendly readable document and your predictions in an Excel readable format.   The technical report should show clearly the models you tested and how you selected your final approach.
 Please submit both Rpubs links and .rmd files or other readable formats for technical and non-technical reports.  Also submit the excel file showing the prediction of your models for pH.
 
 # Data Import
 
+We will first load in the data that is required for this analysis. 
+
 ```{r}
-train_df <- readxl::read_xlsx('Data/StudentData.xlsx')
-test_df <- readxl::read_xlsx('Data/StudentEvaluation.xlsx')
+train_df <- readxl::read_xlsx('C:/Users/Shoshana/Documents/CUNY SPS/Data624_Collab/Data/StudentData.xlsx')
+test_df <- readxl::read_xlsx('C:/Users/Shoshana/Documents/CUNY SPS/Data624_Collab/Data/StudentEvaluation.xlsx')
 ```
 
-StudentData.xlsx is our Training data set.
-StudentEvaluation.xlsx is our Test data set.
+`StudentData.xlsx` is our Training data set.
+
+`StudentEvaluation.xlsx` is our Test data set.
 
 # Exporatory Data Analysis
 
-## Data Exploration
-
-### Initial Exploration
+First, we can preview our dataset. 
 
 ```{r}
 glimpse(train_df)
 ```
 
-```{r}
-str(train_df)
-```
+The dataset consists of 2,571 rows and 33 columns. Most of the variables are numeric, except for the first column indicating `Brand Code`. Our response variable is `PH`. 
+
+We can take also take a look at the summary statistics for each of the numeric variables. 
 
 ```{r}
 summary(train_df)
 ```
 
-
-```{r}
-glimpse(test_df)
-```
-
-```{r}
-str(test_df)
-```
-
-```{r}
-summary(test_df)
-```
-
 ### NA Proportions
 
-```{r}
-missing_train_df <- train_df %>%
-                summarise(across(everything(), ~mean(is.na(.)))) %>%
-                pivot_longer(cols = everything(), names_to = "variable", values_to = "na_proportion")
+We can plot the missing values for each column to see what proportion of each variable is missing.
 
-# Create a bar plot using ggplot2
-ggplot(missing_train_df, aes(x = variable, y = na_proportion)) +
-  geom_bar(stat = "identity", fill = "skyblue", color = "lightblue") +
-  theme_minimal() +
-  labs(y = "NA Proportion", x = "Variables") +
-  coord_flip()  
+```{r}
+plot_missing(train_df, 
+             missing_only = T,
+             ggtheme = theme_classic(),
+             theme_config = list(legend.position = c("right")),
+             geom_label_args = list("size" = 3, "label.padding" = unit(0.1, "lines")))
 ```
+
+We can see that majority of the variables are missing less than 1% of values. For those that are missing more than 1% of the data, majority still fall below 5%. The variable with the most missing data, and possibly cause for concern, is `MFR`. However, even this is missing only about 8.25% of the data. 
+
+```{r}
+data.frame(missing = colSums(is.na(train_df))) |>
+  filter(missing == 0) |>
+  rownames()
+```
+
+`Pressure Vacuum` and `Air Pressurer` are the only variables not missing any data. 
 
 ```{r, warning=FALSE}
 VIM::aggr(train_df, numbers=T, sortVars=T, bars = FALSE,
@@ -116,12 +111,21 @@ VIM::aggr(train_df, numbers=T, sortVars=T, bars = FALSE,
 ```
 
 
-### Distribution
+### Distributions
+
+We will now take a look at the distributions of the numeric variables. 
 
 ```{r}
-DataExplorer::plot_histogram(train_df, nrow = 3L, ncol = 4L)
+DataExplorer::plot_histogram(train_df, nrow = 4L, ncol = 4L, ggtheme = theme_classic())
 ```
 
+`Carb Pressure`, `Carb Temp`, `Fill Ounces`, `PC Volume`, and `PH` seem to be relatively normally distributed. 
+
+`Hyd Pressure 1`, `PCS`, `PSC CO2`, `PSC Fill`, `Air Pressurer`, `Oxygen Filler`,`Pressure Vacuum`, and `Temperature` all seem to have a right skew. 
+
+`Hyd Pressure2`, `Hyd Pressure3`, and `Mnf Flow` all seem to have a left skew, although there are also a fair amount of entries with a value at 0. `Filler Speed` and `MFR` also seem to have a left skew. 
+
+Some variables, such as `Balling`, `Balling Lvl`, `Carb Rel`, and `Density` seem to be bimodally distributed. 
 
 ### Initial Findings
 
@@ -185,13 +189,13 @@ DataExplorer::plot_histogram(train_df, nrow = 3L, ncol = 4L)
 unique(train_df$`Brand Code`)
 ```
 
-## Brand Code Distribution
+### Brand Code Distribution
 
-Noting that `Brand Code` has 4 categorical values outside of NA (**A,B,C,D**), further investigation of each values distribution is needed.
+`Brand Code` has 4 categorical values outside of NA (**A,B,C,D**). Let's examine the distribution of these codes.
 
-```{r brand_code_dist, fig.height=5}
-train_df %>%
-  mutate(`Brand Code` = factor(`Brand Code`, levels = names(sort(table(`Brand Code`), decreasing = TRUE)))) %>%
+```{r brand_code_dist, fig.height=5, warning=F}
+train_df |>
+  mutate(`Brand Code` = factor(`Brand Code`, levels = names(sort(table(`Brand Code`), decreasing = TRUE)))) |>
   ggplot(aes(x = `Brand Code`, fill = `Brand Code`)) +
   geom_bar(stat = "count") +
   geom_text(stat = 'count', aes(label = ..count..), vjust = -0.5, color = "black") +
@@ -199,17 +203,21 @@ train_df %>%
   theme_minimal()
 ```
 
-## Correlation
+Majority of the entries in the dataset belong to `Brand Code` B. A and C have about the same number of entries. There are 120 missing values for `Brand Code`. 
 
-### General
+### Correlation
+
+First, we can plot a correlation matrix of our predictor variables to see which predictors are correlated with each other. 
 
 ```{r corrplot_eda, fig.height=15}
-train_numeric_df <- train_df %>% 
-  dplyr::select(where(is.numeric)) %>% 
+train_numeric_df <- train_df |>
+  dplyr::select(where(is.numeric)) |>
   na.omit()
 
 # Calculate correlation matrix
-train_numeric_cor <- cor(train_numeric_df)
+train_numeric_cor <- train_numeric_df |>
+  dplyr::select(-PH) |>
+  cor()
 
 # Generate the correlation plot
 corrplot(train_numeric_cor,
@@ -218,6 +226,7 @@ corrplot(train_numeric_cor,
          col = brewer.pal(n = 10,
                           name = "RdYlBu"),
          type = "lower",
+         diag=FALSE,
          order = "hclust", 
          addCoef.col = "black",
          number.cex = 0.8,
@@ -227,29 +236,36 @@ corrplot(train_numeric_cor,
          number.digits = 1)
 ```
 
+We can see a few instances of multicollinearity in our predictor variables. `Carb Rel`, `Alch Rel`, `Density`, `Balling` and `Balling Level` are all significantly positively correlated with each other. `Hyd Pressue2` is significantly positively correlated with `Hyd Pressure 3`. Likewise, `Carb Temp` with `Carb Pressure`, `MFR` with `Fill Speed`, `Bowl Setpoint` with `Fill Level`, and `Pressure Setpoint` with `Fill Pressure`. 
+
+There are also a number of variables that are highly negatively correlated with each other, such as `Pressure Vacuum` with `Hyd Pressure2` and `Hyd Pressure3`, `Mnf Flow` with `Filler Level` and `Bowl Setpoint`, and `Hyd Pressure4` with `Alch Rel`. 
+
+A number of other variables also display moderate correlations with each other, as can be seen from the medium blue and medium red squares in the correlation plot. 
+
+We will need to address these multicollinearity issues in our models. 
+
 ### PH
 
-With PH being our response variable, assessing PH correlation with other variables is needed.
+With `PH` being our response variable, assessing `PH`'s correlation with other variables is needed.
 
 ```{r ph_corrplot, fig.height=7}
-train_numeric_df %>%
-  dplyr::select(-PH) %>%  # Exclude 'PH' from predictors if needed
-  cor(train_numeric_df$PH) %>%  # Calculate correlations with 'PH'
-  as.data.frame() %>%
-  rownames_to_column(var = "Predictor") %>%
-  filter(Predictor != "PH") %>%  # Ensure 'PH' is not included as its own predictor
-  mutate(Predictor = fct_reorder(factor(Predictor), V1)) %>%  # Reorder factors by correlation for plotting
+train_numeric_df |>
+  dplyr::select(-PH) |>  # Exclude 'PH' from predictors if needed
+  cor(train_numeric_df$PH) |>  # Calculate correlations with 'PH'
+  as.data.frame() |>
+  rownames_to_column(var = "Predictor") |>
+  filter(Predictor != "PH") |>  # Ensure 'PH' is not included as its own predictor
+  mutate(Predictor = fct_reorder(factor(Predictor), V1)) |>  # Reorder factors by correlation for plotting
   ggplot(aes(x = Predictor, y = V1, label = round(V1, 2))) +
-    geom_col(fill = "lightgreen") +
+    geom_col(aes(fill = ifelse(V1 < 0, "negative", "positive"))) +
     geom_text(color = "black", size = 3, vjust = -0.3) +
     coord_flip() +
     labs(title = "Correlations: pH", x = "Predictors", y = "Correlation Coefficient") +
-    theme_minimal()
+    theme_minimal() +
+    theme(legend.position = "none")
 ```
 
-### Correlation Findings
-
-Multicolliniarity is a concern, based on our plots, considering the number of predictor variables with significant correlation.
+Individually, there are no variables that are extremely correlated with `PH`. `Mnf Flow` has the largest correlation of about -0.46. The most significantly positively correlated variables with `PH` are `Bowl Setpoint` and `Filler Level`. The most significantly negatively correlated variables, other than `Mnf Flow`, are `Usage cont`, `Fill Pressure`, and `Pressure Setpoint`. 
 
 ## Data Cleanup
 
