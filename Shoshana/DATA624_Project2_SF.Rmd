@@ -1,5 +1,5 @@
 ---
-title: 'DATA 624: PREDICTIVE ANALYTICS: Project 2'
+title: 'DATA 624 PREDICTIVE ANALYTICS - Project 2'
 author: "Melissa Bowman, Frederick Jones, Shoshana Farber, Gabriel Campos"
 date: "Last edited `r format(Sys.time(), '%B %d, %Y')`"
 output:
@@ -12,7 +12,7 @@ output:
 urlcolor: blue
 ---
 
-# Library
+# Libraries
 
 ```{r, warning=FALSE, message=FALSE}
 library(Amelia)
@@ -45,70 +45,65 @@ library(tidyr)
 library(VIM)
 ```
 
-# Description
+# Assignment Description
 
 **Project #2 (Team) Assignment**
 
-This is role playing.  I am your new boss.  I am in charge of production at ABC Beverage and you are a team of data scientists reporting to me.  My leadership has told me that new regulations are requiring us to understand our manufacturing process, the predictive factors and be able to report to them our predictive model of PH.
+This is role playing.  I am your new boss.  I am in charge of production at ABC Beverage and you are a team of data scientists reporting to me.  My leadership has told me that new regulations are requiring us to understand our manufacturing process, the predictive factors and be able to report to them our predictive model of pH.
 
 Please use the historical data set I am providing.  Build and report the factors in BOTH a technical and non-technical report.  I like to use Word and Excel.  Please provide your non-technical report in a  business friendly readable document and your predictions in an Excel readable format.   The technical report should show clearly the models you tested and how you selected your final approach.
 Please submit both Rpubs links and .rmd files or other readable formats for technical and non-technical reports.  Also submit the excel file showing the prediction of your models for pH.
 
 # Data Import
 
+We will first load in the data that is required for this analysis. 
+
 ```{r}
 train_df <- readxl::read_xlsx('Data/StudentData.xlsx')
 test_df <- readxl::read_xlsx('Data/StudentEvaluation.xlsx')
 ```
 
-StudentData.xlsx is our Training data set.
-StudentEvaluation.xlsx is our Test data set.
+`StudentData.xlsx` is our Training data set.
+
+`StudentEvaluation.xlsx` is our Test data set.
 
 # Exporatory Data Analysis
 
-## Data Exploration
-
-### Initial Exploration
+First, we can preview our dataset. 
 
 ```{r}
 glimpse(train_df)
 ```
 
-```{r}
-str(train_df)
-```
+The dataset consists of 2,571 rows and 33 columns. Most of the variables are numeric, except for the first column indicating `Brand Code`. Our response variable is `PH`. 
+
+We can take also take a look at the summary statistics for each of the numeric variables. 
 
 ```{r}
 summary(train_df)
 ```
 
-
-```{r}
-glimpse(test_df)
-```
-
-```{r}
-str(test_df)
-```
-
-```{r}
-summary(test_df)
-```
-
 ### NA Proportions
 
-```{r}
-missing_train_df <- train_df %>%
-                summarise(across(everything(), ~mean(is.na(.)))) %>%
-                pivot_longer(cols = everything(), names_to = "variable", values_to = "na_proportion")
+We can plot the missing values for each column to see what proportion of each variable is missing.
 
-# Create a bar plot using ggplot2
-ggplot(missing_train_df, aes(x = variable, y = na_proportion)) +
-  geom_bar(stat = "identity", fill = "skyblue", color = "lightblue") +
-  theme_minimal() +
-  labs(y = "NA Proportion", x = "Variables") +
-  coord_flip()  
+```{r}
+plot_missing(train_df, 
+             missing_only = T,
+             ggtheme = theme_classic(),
+             theme_config = list(legend.position = c("right")),
+             geom_label_args = list("size" = 3, "label.padding" = unit(0.1, "lines")))
 ```
+
+We can see that majority of the variables are missing less than 1% of values. For those that are missing more than 1% of the data, majority still fall below 5%. The variable with the most missing data, and possibly cause for concern, is `MFR`. However, even this is missing only about 8.25% of the data. 
+
+```{r}
+data.frame(missing = colSums(is.na(train_df))) |>
+  filter(missing == 0) |>
+  rownames()
+```
+
+`Pressure Vacuum` and `Air Pressurer` are the only variables not missing any data. 
 
 ```{r, warning=FALSE}
 VIM::aggr(train_df, numbers=T, sortVars=T, bars = FALSE,
@@ -116,12 +111,21 @@ VIM::aggr(train_df, numbers=T, sortVars=T, bars = FALSE,
 ```
 
 
-### Distribution
+### Distributions
+
+We will now take a look at the distributions of the numeric variables. 
 
 ```{r}
-DataExplorer::plot_histogram(train_df, nrow = 3L, ncol = 4L)
+DataExplorer::plot_histogram(train_df, nrow = 4L, ncol = 4L, ggtheme = theme_classic())
 ```
 
+`Carb Pressure`, `Carb Temp`, `Fill Ounces`, `PC Volume`, and `PH` seem to be relatively normally distributed. 
+
+`Hyd Pressure 1`, `PCS`, `PSC CO2`, `PSC Fill`, `Air Pressurer`, `Oxygen Filler`,`Pressure Vacuum`, and `Temperature` all seem to have a right skew. 
+
+`Hyd Pressure2`, `Hyd Pressure3`, and `Mnf Flow` all seem to have a left skew, although there are also a fair amount of entries with a value at 0. `Filler Speed` and `MFR` also seem to have a left skew. 
+
+Some variables, such as `Balling`, `Balling Lvl`, `Carb Rel`, and `Density` seem to be bimodally distributed. 
 
 ### Initial Findings
 
@@ -185,13 +189,13 @@ DataExplorer::plot_histogram(train_df, nrow = 3L, ncol = 4L)
 unique(train_df$`Brand Code`)
 ```
 
-## Brand Code Distribution
+### Brand Code Distribution
 
-Noting that `Brand Code` has 4 categorical values outside of NA (**A,B,C,D**), further investigation of each values distribution is needed.
+`Brand Code` has 4 categorical values outside of NA (**A,B,C,D**). Let's examine the distribution of these codes.
 
-```{r brand_code_dist, fig.height=5}
-train_df %>%
-  mutate(`Brand Code` = factor(`Brand Code`, levels = names(sort(table(`Brand Code`), decreasing = TRUE)))) %>%
+```{r brand_code_dist, fig.height=5, warning=F}
+train_df |>
+  mutate(`Brand Code` = factor(`Brand Code`, levels = names(sort(table(`Brand Code`), decreasing = TRUE)))) |>
   ggplot(aes(x = `Brand Code`, fill = `Brand Code`)) +
   geom_bar(stat = "count") +
   geom_text(stat = 'count', aes(label = ..count..), vjust = -0.5, color = "black") +
@@ -199,17 +203,21 @@ train_df %>%
   theme_minimal()
 ```
 
-## Correlation
+Majority of the entries in the dataset belong to `Brand Code` B. A and C have about the same number of entries. There are 120 missing values for `Brand Code`. 
 
-### General
+### Correlation
+
+First, we can plot a correlation matrix of our predictor variables to see which predictors are correlated with each other. 
 
 ```{r corrplot_eda, fig.height=15}
-train_numeric_df <- train_df %>% 
-  dplyr::select(where(is.numeric)) %>% 
+train_numeric_df <- train_df |>
+  dplyr::select(where(is.numeric)) |>
   na.omit()
 
 # Calculate correlation matrix
-train_numeric_cor <- cor(train_numeric_df)
+train_numeric_cor <- train_numeric_df |>
+  dplyr::select(-PH) |>
+  cor()
 
 # Generate the correlation plot
 corrplot(train_numeric_cor,
@@ -218,6 +226,7 @@ corrplot(train_numeric_cor,
          col = brewer.pal(n = 10,
                           name = "RdYlBu"),
          type = "lower",
+         diag=FALSE,
          order = "hclust", 
          addCoef.col = "black",
          number.cex = 0.8,
@@ -227,29 +236,36 @@ corrplot(train_numeric_cor,
          number.digits = 1)
 ```
 
+We can see a few instances of multicollinearity in our predictor variables. `Carb Rel`, `Alch Rel`, `Density`, `Balling` and `Balling Level` are all significantly positively correlated with each other. `Hyd Pressue2` is significantly positively correlated with `Hyd Pressure 3`. Likewise, `Carb Temp` with `Carb Pressure`, `MFR` with `Fill Speed`, `Bowl Setpoint` with `Fill Level`, and `Pressure Setpoint` with `Fill Pressure`. 
+
+There are also a number of variables that are highly negatively correlated with each other, such as `Pressure Vacuum` with `Hyd Pressure2` and `Hyd Pressure3`, `Mnf Flow` with `Filler Level` and `Bowl Setpoint`, and `Hyd Pressure4` with `Alch Rel`. 
+
+A number of other variables also display moderate correlations with each other, as can be seen from the medium blue and medium red squares in the correlation plot. 
+
+We will need to address these multicollinearity issues in our models. 
+
 ### PH
 
-With PH being our response variable, assessing PH correlation with other variables is needed.
+With `PH` being our response variable, assessing `PH`'s correlation with other variables is needed.
 
 ```{r ph_corrplot, fig.height=7}
-train_numeric_df %>%
-  dplyr::select(-PH) %>%  # Exclude 'PH' from predictors if needed
-  cor(train_numeric_df$PH) %>%  # Calculate correlations with 'PH'
-  as.data.frame() %>%
-  rownames_to_column(var = "Predictor") %>%
-  filter(Predictor != "PH") %>%  # Ensure 'PH' is not included as its own predictor
-  mutate(Predictor = fct_reorder(factor(Predictor), V1)) %>%  # Reorder factors by correlation for plotting
+train_numeric_df |>
+  dplyr::select(-PH) |>  # Exclude 'PH' from predictors if needed
+  cor(train_numeric_df$PH) |>  # Calculate correlations with 'PH'
+  as.data.frame() |>
+  rownames_to_column(var = "Predictor") |>
+  filter(Predictor != "PH") |>  # Ensure 'PH' is not included as its own predictor
+  mutate(Predictor = fct_reorder(factor(Predictor), V1)) |>  # Reorder factors by correlation for plotting
   ggplot(aes(x = Predictor, y = V1, label = round(V1, 2))) +
-    geom_col(fill = "lightgreen") +
+    geom_col(aes(fill = ifelse(V1 < 0, "negative", "positive"))) +
     geom_text(color = "black", size = 3, vjust = -0.3) +
     coord_flip() +
     labs(title = "Correlations: pH", x = "Predictors", y = "Correlation Coefficient") +
-    theme_minimal()
+    theme_minimal() +
+    theme(legend.position = "none")
 ```
 
-### Correlation Findings
-
-Multicolliniarity is a concern, based on our plots, considering the number of predictor variables with significant correlation.
+Individually, there are no variables that are extremely correlated with `PH`. `Mnf Flow` has the largest correlation of about -0.46. The most significantly positively correlated variables with `PH` are `Bowl Setpoint` and `Filler Level`. The most significantly negatively correlated variables, other than `Mnf Flow`, are `Usage cont`, `Fill Pressure`, and `Pressure Setpoint`. 
 
 ## Data Cleanup
 
@@ -347,3 +363,241 @@ train_proc_df <- train_preProc_df[training_set_df,]
 eval_proc_df <- train_preProc_df[-training_set_df,]
 ```
 
+## PLS
+
+```{r}
+train_proc_pls_df<-train_proc_df
+eval_proc_pls_df<-eval_proc_df
+```
+
+
+```{r}
+set.seed(222)
+y_train <- subset(train_proc_pls_df, select = -c(PH))
+y_test <- subset(eval_proc_pls_df, select = -c(PH))
+```
+
+```{r message=FALSE, warning=FALSE}
+set.seed(2341)
+#generate model
+pls_model <- train(y_train, train_proc_pls_df$PH,
+                      method='pls',
+                      metric='Rsquared',
+                      tuneLength=10,
+                      trControl=trainControl(method = "cv",  number = 10))
+#evaluate model metrics
+plsPred <-predict(pls_model, newdata=y_test)
+plsReSample <- postResample(pred=plsPred, obs = eval_proc_pls_df$PH)
+```
+
+```{r message=FALSE, warning=FALSE}
+
+plsReSample %>% kable() %>% kable_paper()
+```
+
+## plsr 
+
+```{r}
+head(train_proc_df)
+head(eval_proc_df)
+```
+
+## missing values 
+
+```{r}
+eval_proc_df <- na.omit(eval_proc_df)
+train_proc_df <- na.omit(train_proc_df)
+
+```
+
+```{r}
+# Install and load the necessary packages
+library(pls)
+
+# Assuming train_proc_df contains your training data
+# Fit PLSR model
+plsr_model <- plsr(PH ~ ., data = train_proc_df, ncomp = 10)  # Set a reasonable maximum number of components
+
+# Extract the proportion of variance explained by each component
+variance_explained <- summary(plsr_model)$val$prop
+
+# Create a scree plot
+plot(1:length(variance_explained), variance_explained, type = "b", 
+     xlab = "Number of Components", ylab = "Proportion of Variance Explained",
+     main = "Scree Plot for PLSR")
+
+# Add a horizontal line at 0.05 for reference (adjust as needed)
+abline(h = 0.05, col = "red", lty = 2)
+
+# Add text indicating the percentage of variance explained by each component
+text(1:length(variance_explained), variance_explained, 
+     labels = paste0(round(variance_explained * 100, 2), "%"),
+     pos = 3, cex = 0.8)
+
+# Add a legend
+legend("topright", legend = "Threshold (e.g., 0.05)", lty = 2, col = "red", bty = "n")
+
+```
+
+```{r}
+# Create a scree plot for the first few components
+plot(1:length(variance_explained), variance_explained, type = "b", 
+     xlab = "Number of Components", ylab = "Proportion of Variance Explained",
+     main = "Scree Plot for PLSR")
+
+# Zoom in on the first few components (adjust xlim as needed)
+xlim <- c(1, min(10, length(variance_explained)))  # Adjust the maximum number of components if needed
+plot(1:length(variance_explained), variance_explained, type = "b", 
+     xlab = "Number of Components", ylab = "Proportion of Variance Explained",
+     main = "Scree Plot for PLSR", xlim = xlim)
+
+# Add a horizontal line at 0.05 for reference (adjust as needed)
+abline(h = 0.05, col = "red", lty = 2)
+
+# Add text indicating the percentage of variance explained by each component
+text(1:length(variance_explained), variance_explained, 
+     labels = paste0(round(variance_explained * 100, 2), "%"),
+     pos = 3, cex = 0.8)
+
+# Add a legend
+legend("topright", legend = "Threshold (e.g., 0.05)", lty = 2, col = "red", bty = "n")
+
+```
+
+
+
+
+
+```{r}
+# Fit PLSR model
+plsr_model <- plsr(PH ~ ., data = train_proc_df, ncomp = 5)  # Specify the number of components (e.g., 5)
+
+summary(plsr_model)
+# Predict PH values for evaluation/test set
+predictions <- predict(plsr_model, newdata = eval_proc_df)
+
+plot(plsr_model)
+
+```
+## model summary explaination
+
+The summary provided gives information about the Partial Least Squares Regression (PLSR) model that was fitted to your data. Here's an explanation of the key elements:
+
+1. **Data Dimensions**:
+   - X dimension: 1964 rows and 28 columns
+   - Y dimension: 1964 rows and 1 column
+   - This indicates that your dataset has 1964 observations (rows) and 28 predictor variables (X) along with 1 response variable (Y).
+
+2. **Fit Method**: 
+   - Kernel PLS (Partial Least Squares) was used as the fitting method for the model. Kernel PLS is a variant of PLS that can handle non-linear relationships between predictors and the response variable.
+
+3. **Number of Components Considered**: 
+   - The model considered up to 5 components in the analysis. Components represent the latent variables extracted by PLS that explain the maximum covariance between the predictor variables (X) and the response variable (Y).
+
+4. **Training: % Variance Explained**:
+   - For each number of components (from 1 to 5), the percentage of variance explained by the model in both the predictor variables (X) and the response variable (PH) is provided.
+   - For example, with 5 components, the model explains 43.78% of the variance in the predictor variables (X) and 39.72% of the variance in the response variable (PH).
+
+Overall, the summary provides insights into how well the PLSR model captures the variance in the data and how many components are needed to explain a significant portion of the variance. Higher percentages indicate that the model captures more variance in the data, suggesting better predictive performance.
+
+
+# model evaluation 
+
+```{r}
+sum(is.na(predictions))
+# Calculate Mean Squared Error (MSE)
+on <- predictions - eval_proc_df$PH
+on <- on^2
+mse <- mean(on)
+
+mse# Calculate R-squared (R²)
+actual <- eval_proc_df$PH
+ss_total <- sum((actual - mean(actual))^2)
+ss_residual <- sum((actual - predictions)^2)
+r_squared <- 1 - (ss_residual / ss_total)
+
+# Print MSE and R²
+cat("Mean Squared Error (MSE):", mse, "\n")
+cat("R-squared (R²):", r_squared, "\n")
+
+```
+## explaination
+
+The Mean Squared Error (MSE) and R-squared (R²) are two common metrics used to evaluate the performance of regression models like Partial Least Squares Regression (PLSR).
+
+1. **Mean Squared Error (MSE)**:
+   - The MSE measures the average squared difference between the predicted values and the actual values.
+   - A lower MSE indicates that the model's predictions are closer to the actual values on average.
+   - In your case, the MSE value of 0.01795639 suggests that, on average, the squared difference between the predicted PH values and the actual PH values is approximately 0.018.
+
+2. **R-squared (R²)**:
+   - The R-squared (R²) value represents the proportion of variance in the dependent variable (PH) that is explained by the independent variables (predictors) in the model.
+   - R² ranges from 0 to 1, where 1 indicates a perfect fit (the model explains all the variance), and 0 indicates that the model does not explain any of the variance.
+   - However, R² can also be negative, which typically occurs when the model performs worse than a horizontal line (a model that simply predicts the mean of the dependent variable for all observations).
+   - In your case, the negative R² value of -2.271855 suggests that the model performs worse than a horizontal line, indicating poor predictive performance. This could be due to various reasons such as overfitting, multicollinearity among predictors, or the model not capturing the underlying relationships in the data adequately.
+
+Overall, based on these values, it seems that the PLSR model is not performing well in explaining the variance in the dependent variable (PH) and making accurate predictions. Further investigation and potentially model refinement or feature engineering may be necessary to improve the model's performance.
+
+
+## Regression Tree model 
+
+```{r}
+# Fit regression tree model to training data
+tree_model <- rpart(PH ~ ., data = train_proc_df)
+
+# Make predictions on evaluation/test data
+tree_predictions <- predict(tree_model, newdata = eval_proc_df)
+
+# Calculate Mean Squared Error (MSE)
+tree_mse <- mean((tree_predictions - eval_proc_df$PH)^2)
+
+# Calculate R-squared (R²)
+tree_actual <- eval_proc_df$PH
+tree_ss_total <- sum((tree_actual - mean(tree_actual))^2)
+tree_ss_residual <- sum((tree_actual - tree_predictions)^2)
+tree_r_squared <- 1 - (tree_ss_residual / tree_ss_total)
+
+# Print MSE and R²
+cat("Regression Tree Model:\n")
+cat("Mean Squared Error (MSE):", tree_mse, "\n")
+cat("R-squared (R²):", tree_r_squared, "\n")
+summary(tree_model)
+
+```
+
+1. **Mean Squared Error (MSE)**: This metric represents the average squared difference between the actual and predicted values of the target variable (PH, in this case). A lower MSE indicates better model performance in terms of prediction accuracy. In your case, the MSE of 0.0151 suggests that, on average, the squared difference between the actual and predicted PH values is relatively low, indicating a reasonably good fit of the regression tree model to the data.
+
+2. **R-squared (R²)**: This metric measures the proportion of the variance in the target variable that is explained by the independent variables in the model. An R-squared value closer to 1 indicates that a larger proportion of the variance in the target variable is explained by the model, suggesting a better fit. Your R-squared value of 0.4497 indicates that the regression tree model explains approximately 45% of the variance in the PH values. While this value is moderate, it suggests that there is still room for improvement in capturing the variability of the target variable.
+
+Overall, based on these metrics, the regression tree model appears to provide a reasonably good fit to the data, with a relatively low MSE and a moderate level of explained variance (R-squared). However, further analysis and possibly model refinement may be beneficial to improve predictive accuracy and capture more of the variability in the PH values.
+1. **Call**: It shows the call that was used to fit the regression tree model, indicating the formula and the dataset.
+
+2. **Complexity Parameter (CP)**: The complexity parameter is used to control the size of the tree. A larger CP results in a smaller tree, which helps prevent overfitting. The CP values in each node represent the cost complexity of that node. As the tree grows, the CP increases.
+
+3. **Variable Importance**: This section shows the importance of each predictor variable in the model. It indicates how much each variable contributes to the decision-making process in the tree.
+
+4. **Node Summary**: Each node in the tree is summarized, showing the number of observations, the mean value of the response variable (PH), and the mean squared error (MSE) associated with that node.
+
+5. **Primary Splits**: These are the variables and values used to split the data at each node. The "improve" value indicates how much the split improves the model's performance.
+
+6. **Surrogate Splits**: Surrogate splits are alternative splits used when the primary split is missing. These splits provide backup options for making decisions.
+
+7. **Mean and MSE for Terminal Nodes**: The terminal nodes (leaf nodes) represent the final segments of the tree where predictions are made. For each terminal node, the mean value of the response variable (PH) and the mean squared error (MSE) are provided.
+
+This summary helps interpret the structure of the regression tree model, showing how the data is split based on different predictor variables and providing insights into the predictive performance of the model at different segments.
+
+
+
+## model Rsquared values 
+
+1. **Mean Squared Error (MSE)**: This metric represents the average squared difference between the actual and predicted values of the target variable (PH, in this case). A lower MSE indicates better model performance in terms of prediction accuracy. In your case, the MSE of 0.0151 suggests that, on average, the squared difference between the actual and predicted PH values is relatively low, indicating a reasonably good fit of the regression tree model to the data.
+
+2. **R-squared (R²)**: This metric measures the proportion of the variance in the target variable that is explained by the independent variables in the model. An R-squared value closer to 1 indicates that a larger proportion of the variance in the target variable is explained by the model, suggesting a better fit. Your R-squared value of 0.4497 indicates that the regression tree model explains approximately 45% of the variance in the PH values. While this value is moderate, it suggests that there is still room for improvement in capturing the variability of the target variable.
+
+Overall, based on these metrics, the regression tree model appears to provide a reasonably good fit to the data, with a relatively low MSE and a moderate level of explained variance (R-squared). However, further analysis and possibly model refinement may be beneficial to improve predictive accuracy and capture more of the variability in the PH values.
+
+```{r}
+# Plot the regression tree model
+rpart.plot(tree_model, main = "Regression Tree Model")
+
+```
