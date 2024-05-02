@@ -59,8 +59,8 @@ Please submit both Rpubs links and .rmd files or other readable formats for tech
 We will first load in the data that is required for this analysis. 
 
 ```{r}
-train_df <- readxl::read_xlsx('C:/Users/Shoshana/Documents/CUNY SPS/Data624_Collab/Data/StudentData.xlsx')
-test_df <- readxl::read_xlsx('C:/Users/Shoshana/Documents/CUNY SPS/Data624_Collab/Data/StudentEvaluation.xlsx')
+train_df <- readxl::read_xlsx('Data/StudentData.xlsx')
+test_df <- readxl::read_xlsx('Data/StudentEvaluation.xlsx')
 ```
 
 `StudentData.xlsx` is our Training data set.
