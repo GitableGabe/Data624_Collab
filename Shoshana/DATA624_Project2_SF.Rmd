@@ -43,6 +43,8 @@ library(rpart.plot)
 library(summarytools)
 library(tidyr)
 library(VIM)
+library(earth)
+library(randomForest)
 ```
 
 # Assignment Description
@@ -59,8 +61,8 @@ Please submit both Rpubs links and .rmd files or other readable formats for tech
 We will first load in the data that is required for this analysis. 
 
 ```{r}
-train_df <- readxl::read_xlsx('Data/StudentData.xlsx')
-test_df <- readxl::read_xlsx('Data/StudentEvaluation.xlsx')
+train_df <- readxl::read_xlsx('C:/Users/Shoshana/Documents/CUNY SPS/Data624_Collab/Data/StudentData.xlsx')
+test_df <- readxl::read_xlsx('C:/Users/Shoshana/Documents/CUNY SPS/Data624_Collab/Data/StudentEvaluation.xlsx')
 ```
 
 `StudentData.xlsx` is our Training data set.
@@ -267,32 +269,35 @@ train_numeric_df |>
 
 Individually, there are no variables that are extremely correlated with `PH`. `Mnf Flow` has the largest correlation of about -0.46. The most significantly positively correlated variables with `PH` are `Bowl Setpoint` and `Filler Level`. The most significantly negatively correlated variables, other than `Mnf Flow`, are `Usage cont`, `Fill Pressure`, and `Pressure Setpoint`. 
 
-## Data Cleanup
+## Data Cleanup and Pre-Processing
 
-* Transform `Brand Code` which will be mutated to categorized factors as in **r chunk** `brand_code_dist`. 
-* Identify unhelpful data:
-  + Identifying variables with zero variance (`zeroVar`) variables
-  + Identify near-zero variance (nzv).
-  + Remove an rows with NAs in our response variable, as it will interfere with analysis in the future.
+First, to make it easier to reference our variables, let's make each column name snakecase.
 
 ```{r}
-train_df%>%
-  dplyr::filter(!is.na(PH))
+names(train_df) <- snakecase::to_snake_case(names(train_df))
+names(test_df) <- snakecase::to_snake_case(names(test_df))
 ```
+
+Now, as `ph` is our target variable, we will need to remove any rows that do not have a value for this column.
 
 ```{r}
-train_df<-train_df%>%
-  dplyr::filter(!is.na(PH))
+train_df <- train_df |>
+  filter(!is.na(ph))
 ```
 
+We will also transform our `brand_code` variable to categorized factors, replacing any NA value with "Unknown". 
 
 ```{r}
-train_df<- train_df %>% 
-  dplyr::mutate(`Brand Code` = factor(`Brand Code`, 
-                         levels = c('A','B','C','D','not known'), 
-                         ordered = FALSE))
+train_df <- train_df |> 
+  dplyr::mutate(brand_code = ifelse(is.na(brand_code), "Unknown", brand_code),
+                brand_code = factor(brand_code, levels = c('A','B','C','D','Unknown'), ordered = FALSE))
+
+test_df <- test_df |> 
+  dplyr::mutate(brand_code = ifelse(is.na(brand_code), "Unknown", brand_code),
+                brand_code = factor(brand_code, levels = c('A','B','C','D','Unknown'), ordered = FALSE))
 ```
 
+We will identify unhelpful columns in the dataset, such as any variables with zero variance or near zero variance. 
 
 ```{r}
 nzv_df <- nearZeroVar(train_df, saveMetrics= TRUE)
@@ -313,15 +318,18 @@ ggplot(nzv_filtered_df, aes(x = Predictor, y = percentUnique, fill = freqRatio >
 print(nzv_filtered_df)
 ```
 
-# Modeling
+`hyd_pressure_1` is the only variable with near zero variance. We will not include this variable in our modeling. 
 
-## Preliminary Data Processing
+Finally, we will pre-process the data for modeling. 
 
-Pre-processing Steps:
+The data is in the form of a tibble. For pre-processing using the `preProcess()` function from the **`caret`** package, we need the data in the form of a dataframe. We will use  `as.data.frame()` to do this.
 
-* Transform the data using as.dataframe() otherwise `preProcess` function from `caret` fails
-* Remove separate response variable from predictors
-* leverage `caret` package method [preProcess](https://www.rdocumentation.org/packages/caret/versions/6.0-92/topics/preProcess) to transform data using methods:
+```{r}
+train_df <- as.data.frame(train_df)
+test_df <- as.data.frame(test_df)
+```
+
+We will leverage `caret` package method [preProcess](https://www.rdocumentation.org/packages/caret/versions/6.0-92/topics/preProcess) to transform data using methods:
   + knnImpute - nearest neighbor to impute missing data
   + nzv = remove near-zero values identified above
   + corr = filters out highly correlated values addressing
@@ -331,273 +339,269 @@ Pre-processing Steps:
   + scale = divides by the standard deviation.
   + BoxCox = normalizes data
 * Use the `predict` function to process the list variables created with `preProcess()` to recreate the dataframe.
-* Rejoin `PH` to the dataframe.
-  
-  
-
 
 ```{r}
-set.seed(1234)
-
-train_df<- as.data.frame(train_df)
-
 #remove pH from the train data set in order to only transform the predictors
-train_preprocess_df <- train_df %>% 
-  dplyr::select(-c(PH))
+train_preprocess_df <- train_df |> 
+  dplyr::select(-c(ph))
 
 preProc_ls <- preProcess(train_preprocess_df, method = c("knnImpute", "nzv", "corr", "center", "scale", "BoxCox"))
 
 train_preProc_df <- predict(preProc_ls, train_preprocess_df)
-train_preProc_df$PH <- train_df$PH 
-# To verify no NAs produced when recombining
-train_preProc_df%>%
-  dplyr::filter(is.na(PH))
+
+# rejoin with pH
+train_preProc_df$ph <- train_df$ph 
+
+#remove pH from the test data set in order to only transform the predictors
+test_preprocess_df <- test_df |> 
+  dplyr::select(-c(ph))
+
+preProc_ls <- preProcess(test_preprocess_df, method = c("knnImpute", "nzv", "corr", "center", "scale", "BoxCox"))
+
+test_preProc_df <- predict(preProc_ls, test_preprocess_df)
+
+# rejoin with pH
+test_preProc_df$ph <- test_df$ph 
 ```
 
-## Data Partition
+Let's check that no missing values remain. 
 
 ```{r}
-training_set_df <- createDataPartition(train_preProc_df$PH, p=0.8, list=FALSE)
-
-train_proc_df <- train_preProc_df[training_set_df,]
-eval_proc_df <- train_preProc_df[-training_set_df,]
+# verify no NAs remain
+colSums(is.na(train_preProc_df))
 ```
 
-## PLS
+### Data Partition
+
+We will split the data into an 80:20 training and validation set. 
 
 ```{r}
-train_proc_pls_df<-train_proc_df
-eval_proc_pls_df<-eval_proc_df
+set.seed(1234)  # for reproducibility
+
+training_set_df <- createDataPartition(train_preProc_df$ph, p=0.8, list=FALSE)
+
+train <- train_preProc_df[training_set_df,]
+eval <- train_preProc_df[-training_set_df,]
 ```
 
+We will now build several model using the data and we will evaluate each one to determine which is the best model for our data. 
+
+# Modeling
+
+### Linear Model
 
 ```{r}
-set.seed(222)
-y_train <- subset(train_proc_pls_df, select = -c(PH))
-y_test <- subset(eval_proc_pls_df, select = -c(PH))
+lm <- lm(ph ~ ., data=train)
+
+summary(lm)
 ```
+
+The $R^2$ for this model is 0.394 and there are a number of insignificant variables in the model. Let's use the `step()` function to remove some of the more insignificant variables.
+
+```{r}
+lm_update <- step(lm, direction="both", trace=0)
+
+summary(lm_update)
+```
+
+The $R^2$ value increased slightly to about 0.395.
+
+Let's check the diagnostic plots for this model.
+
+```{r}
+par(mfrow = c(1,2))
+plot(lm_update, which = c(1,2))
+```
+
+From the residuals vs fitted plot, there does not seem to be any heteroscedasticity, so constant variance is fulfilled. From the QQ-plot, the residuals seem relatively normally distributed although they diverge from the normal line toward the lower end. 
+
+Let's evaluate how this model performs on the evaluation data. 
+
+```{r}
+lm_pred <- predict(lm_update, eval)
+(lm_metrics <- postResample(lm_pred, eval$ph))
+```
+
+The evaluation set has an $RMSE$ of 0.13 and an $R^2$ of 0.39. 
+
+### PLS Model 
 
 ```{r message=FALSE, warning=FALSE}
 set.seed(2341)
-#generate model
-pls_model <- train(y_train, train_proc_pls_df$PH,
-                      method='pls',
-                      metric='Rsquared',
-                      tuneLength=10,
-                      trControl=trainControl(method = "cv",  number = 10))
-#evaluate model metrics
-plsPred <-predict(pls_model, newdata=y_test)
-plsReSample <- postResample(pred=plsPred, obs = eval_proc_pls_df$PH)
+
+# generate model
+pls_model <- train(ph ~ .,
+                   data=train,
+                   method='pls',
+                   metric='Rsquared',
+                   tuneLength=10,
+                   trControl=trainControl(method = "cv",  number = 10))
+
+plot(pls_model)
+
+pls_model
 ```
 
-```{r message=FALSE, warning=FALSE}
+The optimal number of components for the PLS model was 9, with a corresponding $R^2$ of about 0.39.  
 
-plsReSample %>% kable() %>% kable_paper()
-```
-
-## plsr 
+Let's take a look at the most important variables for the PLS model.
 
 ```{r}
-head(train_proc_df)
-head(eval_proc_df)
+plot(varImp(pls_model))
 ```
 
-## missing values 
+The most important variable is `mnf_flow`. 
+
+Let's evaluate how this model performs on the evaluation data. 
 
 ```{r}
-eval_proc_df <- na.omit(eval_proc_df)
-train_proc_df <- na.omit(train_proc_df)
-
+# evaluate model metrics
+pls_pred <- predict(pls_model, eval)
+(pls_metrics <- postResample(pls_pred, eval$ph))
 ```
+
+The evaluation set for the PLS model has a slightly improved $R^2$ of 0.40. 
+
+### KNN Model
 
 ```{r}
-# Install and load the necessary packages
-library(pls)
+set.seed(613) 
 
-# Assuming train_proc_df contains your training data
-# Fit PLSR model
-plsr_model <- plsr(PH ~ ., data = train_proc_df, ncomp = 10)  # Set a reasonable maximum number of components
-
-# Extract the proportion of variance explained by each component
-variance_explained <- summary(plsr_model)$val$prop
-
-# Create a scree plot
-plot(1:length(variance_explained), variance_explained, type = "b", 
-     xlab = "Number of Components", ylab = "Proportion of Variance Explained",
-     main = "Scree Plot for PLSR")
-
-# Add a horizontal line at 0.05 for reference (adjust as needed)
-abline(h = 0.05, col = "red", lty = 2)
-
-# Add text indicating the percentage of variance explained by each component
-text(1:length(variance_explained), variance_explained, 
-     labels = paste0(round(variance_explained * 100, 2), "%"),
-     pos = 3, cex = 0.8)
-
-# Add a legend
-legend("topright", legend = "Threshold (e.g., 0.05)", lty = 2, col = "red", bty = "n")
-
+knn_model <- train(ph ~ ., 
+                   data = train, 
+                   method = "knn",
+                   tuneLength = 10)
+knn_model
 ```
+
+The optimal k was 13, with a corresponding $R^2$ value of 0.43. This is improved over both the linear and PLS models. 
+
+Let's take a look at the most important variables for this model. 
 
 ```{r}
-# Create a scree plot for the first few components
-plot(1:length(variance_explained), variance_explained, type = "b", 
-     xlab = "Number of Components", ylab = "Proportion of Variance Explained",
-     main = "Scree Plot for PLSR")
-
-# Zoom in on the first few components (adjust xlim as needed)
-xlim <- c(1, min(10, length(variance_explained)))  # Adjust the maximum number of components if needed
-plot(1:length(variance_explained), variance_explained, type = "b", 
-     xlab = "Number of Components", ylab = "Proportion of Variance Explained",
-     main = "Scree Plot for PLSR", xlim = xlim)
-
-# Add a horizontal line at 0.05 for reference (adjust as needed)
-abline(h = 0.05, col = "red", lty = 2)
-
-# Add text indicating the percentage of variance explained by each component
-text(1:length(variance_explained), variance_explained, 
-     labels = paste0(round(variance_explained * 100, 2), "%"),
-     pos = 3, cex = 0.8)
-
-# Add a legend
-legend("topright", legend = "Threshold (e.g., 0.05)", lty = 2, col = "red", bty = "n")
-
+plot(varImp(knn_model))
 ```
 
+For the KNN model, `oxygen_filler` is the most important variable and `mnf_filler` is the second most important variable. 
 
-
-
+Let's evaluate how this model performs on the evaluation data. 
 
 ```{r}
-# Fit PLSR model
-plsr_model <- plsr(PH ~ ., data = train_proc_df, ncomp = 5)  # Specify the number of components (e.g., 5)
-
-summary(plsr_model)
-# Predict PH values for evaluation/test set
-predictions <- predict(plsr_model, newdata = eval_proc_df)
-
-plot(plsr_model)
-
+knn_pred <- predict(knn_model, eval)
+(knn_metrics <- postResample(knn_pred, eval$ph))
 ```
-## model summary explaination
 
-The summary provided gives information about the Partial Least Squares Regression (PLSR) model that was fitted to your data. Here's an explanation of the key elements:
+The KNN model performs much better than the linear and PLS models, with an $R^2$ of about 0.5 on the evaluation set. 
 
-1. **Data Dimensions**:
-   - X dimension: 1964 rows and 28 columns
-   - Y dimension: 1964 rows and 1 column
-   - This indicates that your dataset has 1964 observations (rows) and 28 predictor variables (X) along with 1 response variable (Y).
-
-2. **Fit Method**: 
-   - Kernel PLS (Partial Least Squares) was used as the fitting method for the model. Kernel PLS is a variant of PLS that can handle non-linear relationships between predictors and the response variable.
-
-3. **Number of Components Considered**: 
-   - The model considered up to 5 components in the analysis. Components represent the latent variables extracted by PLS that explain the maximum covariance between the predictor variables (X) and the response variable (Y).
-
-4. **Training: % Variance Explained**:
-   - For each number of components (from 1 to 5), the percentage of variance explained by the model in both the predictor variables (X) and the response variable (PH) is provided.
-   - For example, with 5 components, the model explains 43.78% of the variance in the predictor variables (X) and 39.72% of the variance in the response variable (PH).
-
-Overall, the summary provides insights into how well the PLSR model captures the variance in the data and how many components are needed to explain a significant portion of the variance. Higher percentages indicate that the model captures more variance in the data, suggesting better predictive performance.
-
-
-# model evaluation 
+### MARS Model
 
 ```{r}
-sum(is.na(predictions))
-# Calculate Mean Squared Error (MSE)
-on <- predictions - eval_proc_df$PH
-on <- on^2
-mse <- mean(on)
+marsGrid <- expand.grid(.degree = 1:2, .nprune = 2:38)
 
-mse# Calculate R-squared (R²)
-actual <- eval_proc_df$PH
-ss_total <- sum((actual - mean(actual))^2)
-ss_residual <- sum((actual - predictions)^2)
-r_squared <- 1 - (ss_residual / ss_total)
+set.seed(613)
 
-# Print MSE and R²
-cat("Mean Squared Error (MSE):", mse, "\n")
-cat("R-squared (R²):", r_squared, "\n")
+mars_model <- train(ph ~ ., 
+                    data = train,
+                    method = "earth",
+                    tuneGrid = marsGrid,
+                    trControl = trainControl(method = "cv"))
 
+mars_model
 ```
-## explaination
 
-The Mean Squared Error (MSE) and R-squared (R²) are two common metrics used to evaluate the performance of regression models like Partial Least Squares Regression (PLSR).
+The MARS model is optimal at nprune = 30 and degree = 2. The $R^2$ at this iteration is 0.47 which is not improved from the KNN model. 
 
-1. **Mean Squared Error (MSE)**:
-   - The MSE measures the average squared difference between the predicted values and the actual values.
-   - A lower MSE indicates that the model's predictions are closer to the actual values on average.
-   - In your case, the MSE value of 0.01795639 suggests that, on average, the squared difference between the predicted PH values and the actual PH values is approximately 0.018.
-
-2. **R-squared (R²)**:
-   - The R-squared (R²) value represents the proportion of variance in the dependent variable (PH) that is explained by the independent variables (predictors) in the model.
-   - R² ranges from 0 to 1, where 1 indicates a perfect fit (the model explains all the variance), and 0 indicates that the model does not explain any of the variance.
-   - However, R² can also be negative, which typically occurs when the model performs worse than a horizontal line (a model that simply predicts the mean of the dependent variable for all observations).
-   - In your case, the negative R² value of -2.271855 suggests that the model performs worse than a horizontal line, indicating poor predictive performance. This could be due to various reasons such as overfitting, multicollinearity among predictors, or the model not capturing the underlying relationships in the data adequately.
-
-Overall, based on these values, it seems that the PLSR model is not performing well in explaining the variance in the dependent variable (PH) and making accurate predictions. Further investigation and potentially model refinement or feature engineering may be necessary to improve the model's performance.
-
-
-## Regression Tree model 
+Let's take a look at the most important variables for this model. 
 
 ```{r}
-# Fit regression tree model to training data
-tree_model <- rpart(PH ~ ., data = train_proc_df)
-
-# Make predictions on evaluation/test data
-tree_predictions <- predict(tree_model, newdata = eval_proc_df)
-
-# Calculate Mean Squared Error (MSE)
-tree_mse <- mean((tree_predictions - eval_proc_df$PH)^2)
-
-# Calculate R-squared (R²)
-tree_actual <- eval_proc_df$PH
-tree_ss_total <- sum((tree_actual - mean(tree_actual))^2)
-tree_ss_residual <- sum((tree_actual - tree_predictions)^2)
-tree_r_squared <- 1 - (tree_ss_residual / tree_ss_total)
-
-# Print MSE and R²
-cat("Regression Tree Model:\n")
-cat("Mean Squared Error (MSE):", tree_mse, "\n")
-cat("R-squared (R²):", tree_r_squared, "\n")
-summary(tree_model)
-
+plot(varImp(mars_model))
 ```
 
-1. **Mean Squared Error (MSE)**: This metric represents the average squared difference between the actual and predicted values of the target variable (PH, in this case). A lower MSE indicates better model performance in terms of prediction accuracy. In your case, the MSE of 0.0151 suggests that, on average, the squared difference between the actual and predicted PH values is relatively low, indicating a reasonably good fit of the regression tree model to the data.
+This model has fewer important variables than the PLS and the KNN models. Like with the PLS model, `mnf_flow` is the most important variable. 
 
-2. **R-squared (R²)**: This metric measures the proportion of the variance in the target variable that is explained by the independent variables in the model. An R-squared value closer to 1 indicates that a larger proportion of the variance in the target variable is explained by the model, suggesting a better fit. Your R-squared value of 0.4497 indicates that the regression tree model explains approximately 45% of the variance in the PH values. While this value is moderate, it suggests that there is still room for improvement in capturing the variability of the target variable.
-
-Overall, based on these metrics, the regression tree model appears to provide a reasonably good fit to the data, with a relatively low MSE and a moderate level of explained variance (R-squared). However, further analysis and possibly model refinement may be beneficial to improve predictive accuracy and capture more of the variability in the PH values.
-1. **Call**: It shows the call that was used to fit the regression tree model, indicating the formula and the dataset.
-
-2. **Complexity Parameter (CP)**: The complexity parameter is used to control the size of the tree. A larger CP results in a smaller tree, which helps prevent overfitting. The CP values in each node represent the cost complexity of that node. As the tree grows, the CP increases.
-
-3. **Variable Importance**: This section shows the importance of each predictor variable in the model. It indicates how much each variable contributes to the decision-making process in the tree.
-
-4. **Node Summary**: Each node in the tree is summarized, showing the number of observations, the mean value of the response variable (PH), and the mean squared error (MSE) associated with that node.
-
-5. **Primary Splits**: These are the variables and values used to split the data at each node. The "improve" value indicates how much the split improves the model's performance.
-
-6. **Surrogate Splits**: Surrogate splits are alternative splits used when the primary split is missing. These splits provide backup options for making decisions.
-
-7. **Mean and MSE for Terminal Nodes**: The terminal nodes (leaf nodes) represent the final segments of the tree where predictions are made. For each terminal node, the mean value of the response variable (PH) and the mean squared error (MSE) are provided.
-
-This summary helps interpret the structure of the regression tree model, showing how the data is split based on different predictor variables and providing insights into the predictive performance of the model at different segments.
-
-
-
-## model Rsquared values 
-
-1. **Mean Squared Error (MSE)**: This metric represents the average squared difference between the actual and predicted values of the target variable (PH, in this case). A lower MSE indicates better model performance in terms of prediction accuracy. In your case, the MSE of 0.0151 suggests that, on average, the squared difference between the actual and predicted PH values is relatively low, indicating a reasonably good fit of the regression tree model to the data.
-
-2. **R-squared (R²)**: This metric measures the proportion of the variance in the target variable that is explained by the independent variables in the model. An R-squared value closer to 1 indicates that a larger proportion of the variance in the target variable is explained by the model, suggesting a better fit. Your R-squared value of 0.4497 indicates that the regression tree model explains approximately 45% of the variance in the PH values. While this value is moderate, it suggests that there is still room for improvement in capturing the variability of the target variable.
-
-Overall, based on these metrics, the regression tree model appears to provide a reasonably good fit to the data, with a relatively low MSE and a moderate level of explained variance (R-squared). However, further analysis and possibly model refinement may be beneficial to improve predictive accuracy and capture more of the variability in the PH values.
+Let's evaluate how this model performs on the evaluation data. 
 
 ```{r}
-# Plot the regression tree model
-rpart.plot(tree_model, main = "Regression Tree Model")
-
+mars_pred <- predict(mars_model, eval)
+(mars_metrics <- postResample(mars_pred, eval$ph))
 ```
+
+The evaluation set has an $R^2$ of 0.5, slightly improved over the KNN model. 
+
+### SVM Model
+
+```{r}
+set.seed(613)
+
+svm_model <- train(ph ~ ., 
+                   data = train,
+                   method = "svmRadial",
+                   tuneLength = 14,
+                   trControl = trainControl(method = "cv"))
+
+svm_model
+```
+
+The optimal model has a sigma of about 0.024 and C = 4. The $R^2$ for this model is about 0.54. 
+
+Let's take a look at the most important variables for this model. 
+
+```{r}
+plot(varImp(svm_model))
+```
+
+This model has the same important variables as the MARS model in the same order. 
+
+Let's evaluate how this model performs on the evaluation data. 
+
+```{r}
+svm_pred <- predict(svm_model, eval)
+(svm_metrics <- postResample(svm_pred, eval$ph))
+```
+
+This model is much improved from the previous models, with an $R^2$ of about 0.58 for the evaluation set. 
+
+### Random Forest Model
+
+```{r}
+set.seed(613)
+
+rf_model <- randomForest(ph ~ ., 
+                         data = train,
+                         importance = TRUE,
+                         ntree = 1000)
+
+rf_model
+
+rf_model
+```
+
+The model explains 65% of the variability, much improved from our previous models. 
+
+Let's take a look at the most important variables for this model. 
+
+```{r}
+varImp(rf_model) |>
+  arrange(desc(Overall)) |>
+  knitr::kable()
+```
+
+`brand_code` is the most important variable for this model and `mnf_flow` is the second most important. 
+
+Let's evaluate how this model performs on the evaluation data. 
+
+```{r}
+rf_pred <- predict(rf_model, eval)
+(rf_metrics <- postResample(rf_pred, eval$ph))
+```
+
+This model performs the best from all the previous models. The $R^2$ for the evaluation set is 0.69. 
+
+Let's take a look at all the metrics together. 
+
+```{r}
+rbind(lm_metrics, pls_metrics, knn_metrics, mars_metrics, svm_metrics, rf_metrics) |>
+  knitr::kable()
+```
+
+We can clearly see that the random forest model has the highest prediction accuracy when it comes to the evaluation set, with an $R^2$ of about 69%. 
