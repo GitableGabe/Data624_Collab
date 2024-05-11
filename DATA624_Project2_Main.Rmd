@@ -605,3 +605,28 @@ rbind(lm_metrics, pls_metrics, knn_metrics, mars_metrics, svm_metrics, rf_metric
 ```
 
 We can clearly see that the random forest model has the highest prediction accuracy when it comes to the evaluation set, with an $R^2$ of about 69%. 
+
+```{r}
+
+predictions <- predict(rf_model, newdata = test_preProc_df)
+
+
+test_preProc_df$predicted_ph <- predictions
+
+# Join the original test_df with the predictions
+merged_df <- cbind(test_df, predicted_ph = predictions)
+
+# Calculate the percentage difference
+merged_df$percentage_difference <- ((merged_df$ph - merged_df$predicted_ph) / merged_df$ph) * 100
+
+# Reorder the columns to have "ph", "predicted_ph", and "percentage_difference" as the last three columns
+merged_df <- merged_df[, c(setdiff(names(merged_df), c("ph", "predicted_ph", "percentage_difference")), 
+                            "ph", "predicted_ph", "percentage_difference")]
+
+library(openxlsx)  
+
+output_file <- "predictions.xlsx"
+
+write.xlsx(merged_df, file = output_file, rowNames = FALSE)
+```
+
