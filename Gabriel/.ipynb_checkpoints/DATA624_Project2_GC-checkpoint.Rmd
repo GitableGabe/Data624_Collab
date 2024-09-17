@@ -1,0 +1,374 @@
+---
+title: 'DATA 624: PREDICTIVE ANALYTICS: Project 2'
+author: "Melissa Bowman, Frederick Jones, Shoshana Farber, Gabriel Campos"
+date: "Last edited `r format(Sys.time(), '%B %d, %Y')`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+  geometry: left=0.5cm,right=0.5cm,top=1cm,bottom=2cm
+  html_document:
+    df_print: paged
+  html_notebook: default
+urlcolor: blue
+---
+
+# Library
+
+```{r, warning=FALSE, message=FALSE}
+library(Amelia)
+library(car)
+library(caret)
+library(corrplot)
+library(Cubist)
+library(DataExplorer)
+library(dplyr)
+library(e1071)
+library(earth)
+library(forcats)
+library(forecast)
+library(fpp3)
+library(gbm)
+library(ggplot2)
+library(kableExtra)
+library(MASS)
+library(mice)
+library(mlbench)
+library(party)
+library(randomForest)
+library(RANN)
+library(RColorBrewer)
+library(readxl)
+library(rpart)
+library(rpart.plot)
+library(summarytools)
+library(tidyr)
+library(VIM)
+```
+
+# Description
+
+**Project #2 (Team) Assignment**
+
+This is role playing.  I am your new boss.  I am in charge of production at ABC Beverage and you are a team of data scientists reporting to me.  My leadership has told me that new regulations are requiring us to understand our manufacturing process, the predictive factors and be able to report to them our predictive model of PH.
+
+Please use the historical data set I am providing.  Build and report the factors in BOTH a technical and non-technical report.  I like to use Word and Excel.  Please provide your non-technical report in a  business friendly readable document and your predictions in an Excel readable format.   The technical report should show clearly the models you tested and how you selected your final approach.
+Please submit both Rpubs links and .rmd files or other readable formats for technical and non-technical reports.  Also submit the excel file showing the prediction of your models for pH.
+
+# Data Import
+
+```{r}
+train_df <- readxl::read_xlsx('Data/StudentData.xlsx')
+test_df <- readxl::read_xlsx('Data/StudentEvaluation.xlsx')
+```
+
+StudentData.xlsx is our Training data set.
+StudentEvaluation.xlsx is our Test data set.
+
+# Exporatory Data Analysis
+
+## Data Exploration
+
+### Initial Exploration
+
+```{r}
+glimpse(train_df)
+```
+
+```{r}
+str(train_df)
+```
+
+```{r}
+summary(train_df)
+```
+
+
+```{r}
+glimpse(test_df)
+```
+
+```{r}
+str(test_df)
+```
+
+```{r}
+summary(test_df)
+```
+
+### NA Proportions
+
+```{r}
+missing_train_df <- train_df %>%
+                summarise(across(everything(), ~mean(is.na(.)))) %>%
+                pivot_longer(cols = everything(), names_to = "variable", values_to = "na_proportion")
+
+# Create a bar plot using ggplot2
+ggplot(missing_train_df, aes(x = variable, y = na_proportion)) +
+  geom_bar(stat = "identity", fill = "skyblue", color = "lightblue") +
+  theme_minimal() +
+  labs(y = "NA Proportion", x = "Variables") +
+  coord_flip()  
+```
+
+```{r, warning=FALSE}
+VIM::aggr(train_df, numbers=T, sortVars=T, bars = FALSE,
+          cex.axis = .6)
+```
+
+
+### Distribution
+
+```{r}
+DataExplorer::plot_histogram(train_df, nrow = 3L, ncol = 4L)
+```
+
+
+### Initial Findings
+
+* Data consists of 2571 observations with 33 columns
+* `Brand Code`:
+  + Type character
+  + Unordered categorical values
+* Predictors:
+  + Primarily doubles
+  + 4 can be considered integers
+  + High range variables:
+    i. `Mnf Flow` -100.20 to 220.40
+    ii. `Hyd Pressure1` -50.00 to 50.00
+    iii. `Hyd Pressure2` -50.00 to 61.40
+    iv. `Hyd Pressure3` -50.00 to 49.20
+    v. `Hyd Pressure4` 68.00 to 140.00
+* About 8% of the values for `MFR` is missing.  
+* `Brand Code` is missing about 5% 
+* Filler Speed is missing about 2%
+* Remaining Variables have roughly 1% or less missing.  
+* `Pressure.Vacuum`, `Air.Pressurer` have no NAs
+* The Distribution of the variables can be grouped as **left skewed**, **right skewed** and for symmetric we can categorized as **relatively normal**
+  + Relatively Normal Distributions:
+    - `Carb.Pressure`
+    - `Carb.Temp`
+    -`Fill.Ounces`
+    - `PC.Volume`
+    - `PH` 
+  + Left-skew Distributions:
+    - `Carb.Flow`
+    - `Filler.Speed`
+    - `Mnf.Flow`
+    - `MFR`
+    - `Bowl.Setpoint`
+    - `Filler.Level`
+    - `Hyd.Pressure2`
+    - `Hyd.Pressure3`
+    -`Usage.cont`
+    - `Carb.Pressure1`
+    - `Filler.Speed`
+  + Right-skew Distributions:
+    - `Pressure.Setpoint`
+    - `Fill.Pressure`
+    - `Hyd.Pressure1`
+    - `Temperature`
+    - `Carb.Volume`
+    - `PSC`
+    - `PSC.CO2`
+    - `PSC.Fill`
+    - `Balling`
+    - `Density`
+    - `Hyd.Pressure4`
+    - `Air.Pressurer`
+    - `Alch.Rel`
+    - `Carb.Rel`
+    - `Oxygen.Filler`
+    - `Balling.Lvl`
+    - `Pressure.Vacuum`
+
+```{r}
+unique(train_df$`Brand Code`)
+```
+
+## Brand Code Distribution
+
+Noting that `Brand Code` has 4 categorical values outside of NA (**A,B,C,D**), further investigation of each values distribution is needed.
+
+```{r brand_code_dist, fig.height=5}
+train_df %>%
+  mutate(`Brand Code` = factor(`Brand Code`, levels = names(sort(table(`Brand Code`), decreasing = TRUE)))) %>%
+  ggplot(aes(x = `Brand Code`, fill = `Brand Code`)) +
+  geom_bar(stat = "count") +
+  geom_text(stat = 'count', aes(label = ..count..), vjust = -0.5, color = "black") +
+  labs(title = 'Brand Code Distribution', x = 'Brand Code', y = 'Frequency') +
+  theme_minimal()
+```
+
+## Correlation
+
+### General
+
+```{r corrplot_eda, fig.height=15}
+train_numeric_df <- train_df %>% 
+  dplyr::select(where(is.numeric)) %>% 
+  na.omit()
+
+# Calculate correlation matrix
+train_numeric_cor <- cor(train_numeric_df)
+
+# Generate the correlation plot
+corrplot(train_numeric_cor,
+         method = "color",
+         tl.col = "black",
+         col = brewer.pal(n = 10,
+                          name = "RdYlBu"),
+         type = "lower",
+         order = "hclust", 
+         addCoef.col = "black",
+         number.cex = 0.8,
+         tl.cex = 0.8,
+         cl.cex = 0.8,
+         addCoefasPercent = TRUE,
+         number.digits = 1)
+```
+
+### PH
+
+With PH being our response variable, assessing PH correlation with other variables is needed.
+
+```{r ph_corrplot, fig.height=7}
+train_numeric_df %>%
+  dplyr::select(-PH) %>%  # Exclude 'PH' from predictors if needed
+  cor(train_numeric_df$PH) %>%  # Calculate correlations with 'PH'
+  as.data.frame() %>%
+  rownames_to_column(var = "Predictor") %>%
+  filter(Predictor != "PH") %>%  # Ensure 'PH' is not included as its own predictor
+  mutate(Predictor = fct_reorder(factor(Predictor), V1)) %>%  # Reorder factors by correlation for plotting
+  ggplot(aes(x = Predictor, y = V1, label = round(V1, 2))) +
+    geom_col(fill = "lightgreen") +
+    geom_text(color = "black", size = 3, vjust = -0.3) +
+    coord_flip() +
+    labs(title = "Correlations: pH", x = "Predictors", y = "Correlation Coefficient") +
+    theme_minimal()
+```
+
+### Correlation Findings
+
+Multicolliniarity is a concern, based on our plots, considering the number of predictor variables with significant correlation.
+
+## Data Cleanup
+
+* Transform `Brand Code` which will be mutated to categorized factors as in **r chunk** `brand_code_dist`. 
+* Identify unhelpful data:
+  + Identifying variables with zero variance (`zeroVar`) variables
+  + Identify near-zero variance (nzv).
+  + Remove an rows with NAs in our response variable, as it will interfere with analysis in the future.
+
+```{r}
+train_df%>%
+  dplyr::filter(!is.na(PH))
+```
+
+```{r}
+train_df<-train_df%>%
+  dplyr::filter(!is.na(PH))
+```
+
+
+```{r}
+train_df<- train_df %>% 
+  dplyr::mutate(`Brand Code` = factor(`Brand Code`, 
+                         levels = c('A','B','C','D','not known'), 
+                         ordered = FALSE))
+```
+
+
+```{r}
+nzv_df <- nearZeroVar(train_df, saveMetrics= TRUE)
+nzv_df <- as.data.frame(nzv_df) %>% 
+  rownames_to_column(var = "Predictor") 
+
+nzv_filtered_df <- nzv_df %>% 
+  filter(nzv == TRUE)
+
+ggplot(nzv_filtered_df, aes(x = Predictor, y = percentUnique, fill = freqRatio > 0.95)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  labs(title = "Near-Zero Variance Predictors", 
+       x = "Predictors", 
+       y = "Percentage of Unique Values") +
+  theme_minimal()
+
+print(nzv_filtered_df)
+```
+
+# Modeling
+
+## Preliminary Data Processing
+
+Pre-processing Steps:
+
+* Transform the data using as.dataframe() otherwise `preProcess` function from `caret` fails
+* Remove separate response variable from predictors
+* leverage `caret` package method [preProcess](https://www.rdocumentation.org/packages/caret/versions/6.0-92/topics/preProcess) to transform data using methods:
+  + knnImpute - nearest neighbor to impute missing data
+  + nzv = remove near-zero values identified above
+  + corr = filters out highly correlated values addressing
+  multicollinearity
+  + center = subtracts the mean of the predictor's data (again from
+  the data in x) from the predictor values 
+  + scale = divides by the standard deviation.
+  + BoxCox = normalizes data
+* Use the `predict` function to process the list variables created with `preProcess()` to recreate the dataframe.
+* Rejoin `PH` to the dataframe.
+  
+  
+
+
+```{r}
+set.seed(1234)
+
+train_df<- as.data.frame(train_df)
+
+#remove pH from the train data set in order to only transform the predictors
+train_preprocess_df <- train_df %>% 
+  dplyr::select(-c(PH))
+
+preProc_ls <- preProcess(train_preprocess_df, method = c("knnImpute", "nzv", "corr", "center", "scale", "BoxCox"))
+
+train_preProc_df <- predict(preProc_ls, train_preprocess_df)
+train_preProc_df$PH <- train_df$PH 
+# To verify no NAs produced when recombining
+train_preProc_df%>%
+  dplyr::filter(is.na(PH))
+```
+
+## Data Partition
+
+```{r}
+training_set_df <- createDataPartition(train_preProc_df$PH, p=0.8, list=FALSE)
+
+train_proc_df <- train_preProc_df[training_set_df,]
+eval_proc_df <- train_preProc_df[-training_set_df,]
+```
+
+## PLS
+
+```{r}
+set.seed(222)
+y_train <- subset(train_proc_df, select = -c(PH))
+y_test <- subset(eval_proc_df, select = -c(PH))
+```
+
+```{r message=FALSE, warning=FALSE}
+set.seed(2341)
+#generate model
+pls_model <- train(y_train, train_proc_df$PH,
+                      method='pls',
+                      metric='Rsquared',
+                      tuneLength=10,
+                      trControl=trainControl(method = "cv",  number = 10))
+#evaluate model metrics
+plsPred <-predict(pls_model, newdata=y_test)
+plsReSample <- postResample(pred=plsPred, obs = eval_proc_df$PH)
+```
+
+```{r message=FALSE, warning=FALSE}
+
+plsReSample %>% kable() %>% kable_paper()
+```
